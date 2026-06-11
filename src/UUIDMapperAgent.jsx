@@ -1,6 +1,21 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+const LS_KEY = "par_ddm_api_key";
+
+// Works locally (via Vite proxy) and on GitHub Pages (direct browser call)
+async function callAnthropic(apiKey, body) {
+  const isDev = window.location.hostname === "localhost";
+  const url = isDev ? "/anthropic-api/v1/messages" : "https://api.anthropic.com/v1/messages";
+  const headers = { "Content-Type": "application/json" };
+  if (!isDev) {
+    headers["x-api-key"] = apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    headers["anthropic-dangerous-direct-browser-access"] = "true";
+  }
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+  return res.json();
+}
 
 // PAR Retail brand tokens — light mode
 const C = {
@@ -176,8 +191,14 @@ export default function UUIDMapperAgent() {
   const [showColMap,    setShowColMap]    = useState(false);
   const [fallbackState, setFallbackState] = useState("");
   const [autoFilled,    setAutoFilled]    = useState(false);
+  const [apiKey,        setApiKey]        = useState(() => localStorage.getItem(LS_KEY) || "");
+  const [showApiKey,    setShowApiKey]    = useState(false);
   const chatRef = useRef(null);
   const copyRef = useRef(null);
+
+  useEffect(() => {
+    if (apiKey) localStorage.setItem(LS_KEY, apiKey);
+  }, [apiKey]);
 
   const addMsg = (role, text) =>
     setMessages(prev => [...prev, { role, text, ts: Date.now() }]);
@@ -247,16 +268,11 @@ Be concise. User is a data-savvy PM at PAR Retail.`;
     setLoading(true);
     const history = [...messages, { role: "user", text }];
     try {
-      const res = await fetch("/anthropic-api/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: ANTHROPIC_MODEL, max_tokens: 1000,
-          system: buildSystem(),
-          messages: history.map(m => ({ role: m.role === "agent" ? "assistant" : "user", content: m.text })),
-        }),
+      const data = await callAnthropic(apiKey, {
+        model: ANTHROPIC_MODEL, max_tokens: 1000,
+        system: buildSystem(),
+        messages: history.map(m => ({ role: m.role === "agent" ? "assistant" : "user", content: m.text })),
       });
-      const data = await res.json();
       addMsg("agent", data.content?.find(b => b.type === "text")?.text ?? "No response.");
     } catch { addMsg("agent", "⚠️ Network error."); }
     setLoading(false);
@@ -269,10 +285,7 @@ Be concise. User is a data-savvy PM at PAR Retail.`;
     setLoading(true);
     addMsg("agent", "🔍 Auto-detecting columns...");
     try {
-      const res = await fetch("/anthropic-api/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await callAnthropic(apiKey, {
           model: ANTHROPIC_MODEL, max_tokens: 400,
           messages: [{ role: "user", content:
             `Match type: ${matchType}
@@ -299,9 +312,7 @@ Return ONLY valid JSON, no markdown:
   }
 }`
           }],
-        }),
       });
-      const data = await res.json();
       const raw = data.content?.find(b => b.type === "text")?.text ?? "";
       const d = JSON.parse(raw.replace(/```json|```/g, "").trim());
       if (d.refIdCol)   setRefIdCol(d.refIdCol);
@@ -492,8 +503,26 @@ Return ONLY valid JSON, no markdown:
               </div>
             </div>
           </div>
-          <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1, textTransform: "uppercase", border: `1px solid ${C.border}`, borderRadius: 20, padding: "3px 10px" }}>
-            AGDC · 15-Field Output
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {window.location.hostname !== "localhost" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="Anthropic API key…"
+                  style={{ background: C.surface, border: `1px solid ${apiKey ? C.green : C.orange}`, borderRadius: 6, color: C.text, padding: "4px 9px", fontSize: 11, fontFamily: "inherit", outline: "none", width: 210 }}
+                />
+                <button onClick={() => setShowApiKey(v => !v)}
+                  style={{ background: "none", border: "none", color: C.dim, cursor: "pointer", fontSize: 13, padding: "0 2px" }}>
+                  {showApiKey ? "🙈" : "👁"}
+                </button>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: apiKey ? C.green : C.amber, flexShrink: 0 }} title={apiKey ? "API key set" : "API key required for AI features"} />
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1, textTransform: "uppercase", border: `1px solid ${C.border}`, borderRadius: 20, padding: "3px 10px" }}>
+              AGDC · 15-Field Output
+            </div>
           </div>
         </div>
         {/* orange accent bar */}
