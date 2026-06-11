@@ -8,6 +8,80 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <title>DDM File Builder · PAR Retail</title>
+
+    <!-- Password gate — runs before React mounts -->
+    <script>
+      (function () {
+        const PW  = btoa('PAR1');
+        const KEY = 'par_ddm_auth';
+        if (sessionStorage.getItem(KEY) === PW) return; // already authenticated
+
+        // Build lock screen
+        const overlay = document.createElement('div');
+        overlay.id = 'pw-overlay';
+        overlay.style.cssText = [
+          'position:fixed;inset:0;z-index:9999;display:flex;',
+          'align-items:center;justify-content:center;',
+          'background:#f4f5f9;font-family:Inter,system-ui,sans-serif;'
+        ].join('');
+
+        overlay.innerHTML = `
+          <div style="background:#fff;border:1px solid #d9dae8;border-radius:14px;
+                      padding:44px 40px;width:100%;max-width:360px;text-align:center;
+                      box-shadow:0 4px 32px rgba(0,0,0,.08);">
+            <img src="https://partech.com/wp-content/uploads/2025/11/par-logo.svg"
+                 alt="PAR" style="height:30px;margin-bottom:22px;" />
+            <div style="height:2px;background:linear-gradient(90deg,#f97316,#7c3aed);
+                        border-radius:2px;margin-bottom:24px;"></div>
+            <h2 style="font-size:15px;font-weight:800;color:#0f0e2a;margin:0 0 6px;">
+              DDM File Builder
+            </h2>
+            <p style="font-size:12px;color:#6b7280;margin:0 0 22px;line-height:1.6;">
+              This tool is for PAR Retail internal use.<br>
+              Enter the access password to continue.
+            </p>
+            <input id="pw-input" type="password" placeholder="Password" autocomplete="off"
+              style="width:100%;padding:10px 13px;box-sizing:border-box;
+                     border:1px solid #d9dae8;border-radius:7px;font-size:14px;
+                     font-family:inherit;background:#f4f5f9;color:#0f0e2a;
+                     outline:none;text-align:center;letter-spacing:.12em;margin-bottom:10px;" />
+            <button id="pw-btn"
+              style="width:100%;padding:10px 0;border:none;border-radius:7px;
+                     background:linear-gradient(135deg,#f97316,#7c3aed);color:#fff;
+                     font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;">
+              Access Tool →
+            </button>
+            <div id="pw-error" style="margin-top:10px;font-size:12px;color:#dc2626;min-height:18px;"></div>
+          </div>`;
+
+        document.documentElement.appendChild(overlay);
+
+        function checkPassword() {
+          const val = document.getElementById('pw-input').value.trim();
+          if (btoa(val) === PW) {
+            sessionStorage.setItem(KEY, PW);
+            document.getElementById('pw-overlay').remove();
+          } else {
+            const err = document.getElementById('pw-error');
+            err.textContent = 'Incorrect password. Please try again.';
+            document.getElementById('pw-input').value = '';
+            document.getElementById('pw-input').focus();
+            setTimeout(function () { err.textContent = ''; }, 3000);
+          }
+        }
+
+        document.getElementById('pw-btn').addEventListener('click', checkPassword);
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && document.getElementById('pw-overlay')) checkPassword();
+        });
+
+        // Focus input once fonts load
+        setTimeout(function () {
+          var i = document.getElementById('pw-input');
+          if (i) i.focus();
+        }, 100);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
