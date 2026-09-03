@@ -317,24 +317,38 @@ Be concise. User is a data-savvy PM at PAR Retail.`;
           model: ANTHROPIC_MODEL, max_tokens: 2000,
           system: `You are a data column mapper. You MUST respond with ONLY a valid JSON object — no explanation, no markdown, no code fences. If a column cannot be found, use null for that field. Never refuse or add commentary.`,
           messages: [{ role: "user", content:
-            `Identifier type to match on: ${matchType} (use best available if exact type not present — e.g. email if phone not found)
-Ref file columns: ${cleanCols(uuidFile.headers)}
-Ref sample row: ${cleanRow(uuidFile.rows[0])}
-DDM file columns: ${cleanCols(ddmFile.headers)}
-DDM sample row: ${cleanRow(ddmFile.rows[0])}
+            `Task: map columns between two files for a UUID lookup.
 
-Respond with ONLY this JSON (no markdown, no explanation):
+REFERENCE FILE columns: ${cleanCols(uuidFile.headers)}
+REFERENCE FILE sample row: ${cleanRow(uuidFile.rows[0])}
+
+DDM FILE columns: ${cleanCols(ddmFile.headers)}
+DDM FILE sample row: ${cleanRow(ddmFile.rows[0])}
+
+Definitions:
+- refIdCol: column in REFERENCE FILE that contains the ${matchType} identifier (used to match rows)
+- refUuidCol: column in REFERENCE FILE that contains the UUID/loyalty ID value to look up
+- ddmIdCol: column in DDM FILE that contains the ${matchType} identifier (used to find matching ref row)
+
+Respond with ONLY this JSON, filling in exact column names (or null if not found):
 {"refIdCol":null,"refUuidCol":null,"ddmIdCol":null,"colMap":{"Activity Date":null,"Activity Time":null,"Ad ID":null,"Activity Type":null,"Channel Type":null,"Marketing Transaction ID":null,"Loyalty ID/Rewards Number":null,"Activity State":null,"OPTIONAL EAIV Indicator":null}}`
           }],
       });
-      const raw = data.content?.find(b => b.type === "text")?.text ?? "";
+
+      // Surface API-level errors (auth failures, rate limits, etc.)
+      if (!data.content) {
+        const apiErr = data.error?.message || JSON.stringify(data).slice(0, 300);
+        throw new Error(`API error: ${apiErr}`);
+      }
+
+      const raw = data.content.find(b => b.type === "text")?.text ?? "";
       const jsonStr = raw.replace(/```json|```/g, "").trim();
       let d;
       try {
         d = JSON.parse(jsonStr);
       } catch {
         const match = jsonStr.match(/\{[\s\S]*\}/);
-        if (!match) throw new Error(`Auto-detect got unexpected response. Try mapping columns manually.\n\nAI said: ${jsonStr.slice(0, 300)}`);
+        if (!match) throw new Error(`Unexpected AI response — try mapping columns manually.\n\nAI said: "${jsonStr.slice(0, 400)}"`);
         d = JSON.parse(match[0]);
       }
       if (d.refIdCol)   setRefIdCol(d.refIdCol);
