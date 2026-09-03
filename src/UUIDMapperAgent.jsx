@@ -231,7 +231,23 @@ export default function UUIDMapperAgent() {
           const found = fuzzyMatch(f.key, headers);
           if (found) auto[f.key] = found;
         });
+        // Extra synonym hints for common DDM field names
+        const synonyms = {
+          "Activity Date":             ["send_date","senddate","date","activitydate","activity_date","event_date","eventdate"],
+          "Activity Time":             ["send_date","senddate","time","activitytime","activity_time","event_time","eventtime"],
+          "Ad ID":                     ["campaign_id","campaignid","campaign_name","campaignname","ad_id","adid"],
+          "Activity Type":             ["activity_type","activitytype","event_type","eventtype","type"],
+          "Channel Type":              ["channel_type","channeltype","channel"],
+          "Marketing Transaction ID":  ["transaction_id","transactionid","txn_id","txnid","marketing_transaction_id"],
+          "Activity State":            ["state","activity_state","activitystate"],
+        };
+        Object.entries(synonyms).forEach(([key, syns]) => {
+          if (auto[key]) return;
+          const hit = headers.find(h => syns.includes(h.toLowerCase().replace(/\s/g, "_")));
+          if (hit) auto[key] = hit;
+        });
         setColMap(auto);
+        setShowColMap(true); // auto-expand so user can see/adjust mappings
       }
 
       // Auto-fill retailer name + MAN from filename if not already set manually
@@ -405,6 +421,12 @@ Respond with ONLY this JSON, filling in exact column names (or null if not found
         } else {
           const ddmCol = colMap[f.key];
           let val = ddmCol ? (row[ddmCol] ?? "") : "";
+          // If same column mapped to both date (F2) and time (F3), split on the space
+          if (f.num === 2 && val && colMap["Activity Date"] === colMap["Activity Time"]) {
+            val = val.split(/\s+/)[0] ?? val; // take date portion only
+          } else if (f.num === 3 && val && colMap["Activity Date"] === colMap["Activity Time"]) {
+            val = val.split(/\s+/).slice(1).join(" ") || val; // take time portion only
+          }
           if (f.num === 9 && !val && fallbackState) val = fallbackState;
           out[f.label] = val;
         }
@@ -413,6 +435,13 @@ Respond with ONLY this JSON, filling in exact column names (or null if not found
     });
     setResult({ headers: OUTPUT_HEADERS, rows: newRows, stats: { matched, unmatched, total: ddmFile.rows.length } });
     setShowCopy(false);
+
+    // Warn about required fields that are completely blank in the output
+    const blankRequired = AGDC_OUTPUT_FIELDS.filter(f =>
+      f.required && f.num !== 1 && !f.isLoyaltyId && f.num < 11 &&
+      newRows.every(r => !r[f.label])
+    ).map(f => `F${f.num}: ${f.key}`);
+
     let msg = `✅ Done! Output has all 15 AGDC fields in order.\n`;
     if (lookupEnabled) {
       const fb = colMap["Loyalty ID/Rewards Number"] ? "Fallback (DDM value)" : "Blank";
@@ -421,7 +450,8 @@ Respond with ONLY this JSON, filling in exact column names (or null if not found
              `- Total: ${ddmFile.rows.length} rows\n\n` +
              `🔍 Ref sample ${matchType}s: ${sampleRef.join(", ") || "none"}\n` +
              `🔍 DDM sample ${matchType}s: ${sampleDDM.join(", ") || "none"}` +
-             (matched === 0 ? `\n\n⚠️ 0 matches — paste a sample value from each file so I can diagnose the format difference.` : "");
+             (matched === 0 ? `\n\n⚠️ 0 matches — paste a sample value from each file so I can diagnose the format difference.` : "") +
+             (blankRequired.length ? `\n\n⚠️ These required AGDC fields are empty — open "Show field column mapping" to assign DDM columns:\n${blankRequired.join(", ")}` : "");
     } else {
       msg += `⚠️ UUID lookup was skipped (identifier columns not fully mapped).\n- Total: ${ddmFile.rows.length} rows processed.`;
     }
