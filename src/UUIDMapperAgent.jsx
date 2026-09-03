@@ -301,19 +301,26 @@ Be concise. User is a data-savvy PM at PAR Retail.`;
     setLoading(true);
     addMsg("agent", "🔍 Auto-detecting columns...");
     try {
-      // Limit column lists to avoid overwhelming the model / truncating JSON response
-      const trimCols = (cols) => {
-        const joined = cols.join(", ");
-        return joined.length > 800 ? joined.slice(0, 800) + "… (truncated)" : joined;
+      // Strip URL columns and limit to first 30 meaningful columns
+      const cleanCols = (cols) =>
+        cols
+          .filter(c => !c.trim().startsWith("http"))
+          .slice(0, 30)
+          .join(", ");
+      // Strip URL keys from sample row too
+      const cleanRow = (row) => {
+        const out = {};
+        Object.entries(row).filter(([k]) => !k.trim().startsWith("http")).slice(0, 20).forEach(([k,v]) => { out[k] = v; });
+        return JSON.stringify(out).slice(0, 600);
       };
       const data = await callAnthropic(apiKey, {
-          model: ANTHROPIC_MODEL, max_tokens: 1000,
+          model: ANTHROPIC_MODEL, max_tokens: 2000,
           messages: [{ role: "user", content:
             `Match type: ${matchType}
-Ref file columns: ${trimCols(uuidFile.headers)}
-Ref sample row: ${JSON.stringify(uuidFile.rows[0]).slice(0, 400)}
-DDM file columns: ${trimCols(ddmFile.headers)}
-DDM sample row: ${JSON.stringify(ddmFile.rows[0]).slice(0, 400)}
+Ref file columns: ${cleanCols(uuidFile.headers)}
+Ref sample row: ${cleanRow(uuidFile.rows[0])}
+DDM file columns: ${cleanCols(ddmFile.headers)}
+DDM sample row: ${cleanRow(ddmFile.rows[0])}
 
 Return ONLY valid JSON, no markdown:
 {
@@ -335,7 +342,16 @@ Return ONLY valid JSON, no markdown:
           }],
       });
       const raw = data.content?.find(b => b.type === "text")?.text ?? "";
-      const d = JSON.parse(raw.replace(/```json|```/g, "").trim());
+      const jsonStr = raw.replace(/```json|```/g, "").trim();
+      let d;
+      try {
+        d = JSON.parse(jsonStr);
+      } catch {
+        // Try to extract just the JSON object if there's extra text around it
+        const match = jsonStr.match(/\{[\s\S]*\}/);
+        if (!match) throw new Error(`Could not parse AI response: ${jsonStr.slice(0, 200)}`);
+        d = JSON.parse(match[0]);
+      }
       if (d.refIdCol)   setRefIdCol(d.refIdCol);
       if (d.refUuidCol) setRefUuidCol(d.refUuidCol);
       if (d.ddmIdCol)   setDdmIdCol(d.ddmIdCol);
