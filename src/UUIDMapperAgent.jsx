@@ -90,23 +90,39 @@ const AGDC_OUTPUT_FIELDS = [
 
 const OUTPUT_HEADERS = AGDC_OUTPUT_FIELDS.map(f => f.label);
 
-// ── CSV parser ────────────────────────────────────────────────────────────────
+// ── CSV parser — auto-detects delimiter (comma, semicolon, tab) ───────────────
+function detectDelimiter(firstLine) {
+  const counts = { ",": 0, ";": 0, "\t": 0 };
+  let inQ = false;
+  for (const ch of firstLine) {
+    if (ch === '"') { inQ = !inQ; continue; }
+    if (!inQ && counts[ch] !== undefined) counts[ch]++;
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function splitLine(line, delim) {
+  const values = [];
+  let cur = "", inQ = false;
+  for (const ch of line) {
+    if (ch === '"') { inQ = !inQ; continue; }
+    if (ch === delim && !inQ) { values.push(cur.trim()); cur = ""; }
+    else cur += ch;
+  }
+  values.push(cur.trim());
+  return values;
+}
+
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
-  if (!lines.length) return { headers: [], rows: [] };
-  const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+  if (!lines.length) return { headers: [], rows: [], delimiter: "," };
+  const delim = detectDelimiter(lines[0]);
+  const headers = splitLine(lines[0], delim).map(h => h.replace(/^"|"$/g, "").trim());
   const rows = lines.slice(1).filter(l => l.trim()).map(line => {
-    const values = [];
-    let cur = "", inQ = false;
-    for (const ch of line) {
-      if (ch === '"') { inQ = !inQ; continue; }
-      if (ch === "," && !inQ) { values.push(cur.trim()); cur = ""; }
-      else cur += ch;
-    }
-    values.push(cur.trim());
+    const values = splitLine(line, delim);
     return Object.fromEntries(headers.map((h, i) => [h, values[i] ?? ""]));
   });
-  return { headers, rows };
+  return { headers, rows, delimiter: delim };
 }
 
 // ── XLSX parser (SheetJS from cdnjs) ───────────────────────────────────────────
@@ -206,8 +222,8 @@ export default function UUIDMapperAgent() {
   // ── file reading ─────────────────────────────────────────────────────────────
   const readFile = (file, setter, label) => {
     const isXLSX = /\.xlsx?$/i.test(file.name);
-    const finish = ({ headers, rows }) => {
-      setter({ name: file.name, headers, rows });
+    const finish = ({ headers, rows, delimiter }) => {
+      setter({ name: file.name, headers, rows, delimiter });
       if (label === "DDM") {
         const auto = {};
         AGDC_OUTPUT_FIELDS.forEach(f => {
@@ -285,14 +301,19 @@ Be concise. User is a data-savvy PM at PAR Retail.`;
     setLoading(true);
     addMsg("agent", "🔍 Auto-detecting columns...");
     try {
+      // Limit column lists to avoid overwhelming the model / truncating JSON response
+      const trimCols = (cols) => {
+        const joined = cols.join(", ");
+        return joined.length > 800 ? joined.slice(0, 800) + "… (truncated)" : joined;
+      };
       const data = await callAnthropic(apiKey, {
-          model: ANTHROPIC_MODEL, max_tokens: 400,
+          model: ANTHROPIC_MODEL, max_tokens: 1000,
           messages: [{ role: "user", content:
             `Match type: ${matchType}
-Ref file columns: ${uuidFile.headers.join(", ")}
-Ref sample row: ${JSON.stringify(uuidFile.rows[0])}
-DDM file columns: ${ddmFile.headers.join(", ")}
-DDM sample row: ${JSON.stringify(ddmFile.rows[0])}
+Ref file columns: ${trimCols(uuidFile.headers)}
+Ref sample row: ${JSON.stringify(uuidFile.rows[0]).slice(0, 400)}
+DDM file columns: ${trimCols(ddmFile.headers)}
+DDM sample row: ${JSON.stringify(ddmFile.rows[0]).slice(0, 400)}
 
 Return ONLY valid JSON, no markdown:
 {
