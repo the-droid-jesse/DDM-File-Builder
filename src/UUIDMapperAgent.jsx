@@ -315,30 +315,16 @@ Be concise. User is a data-savvy PM at PAR Retail.`;
       };
       const data = await callAnthropic(apiKey, {
           model: ANTHROPIC_MODEL, max_tokens: 2000,
+          system: `You are a data column mapper. You MUST respond with ONLY a valid JSON object — no explanation, no markdown, no code fences. If a column cannot be found, use null for that field. Never refuse or add commentary.`,
           messages: [{ role: "user", content:
-            `Match type: ${matchType}
+            `Identifier type to match on: ${matchType} (use best available if exact type not present — e.g. email if phone not found)
 Ref file columns: ${cleanCols(uuidFile.headers)}
 Ref sample row: ${cleanRow(uuidFile.rows[0])}
 DDM file columns: ${cleanCols(ddmFile.headers)}
 DDM sample row: ${cleanRow(ddmFile.rows[0])}
 
-Return ONLY valid JSON, no markdown:
-{
-  "refIdCol": "column in ref file containing ${matchType}",
-  "refUuidCol": "column in ref file containing UUID",
-  "ddmIdCol": "column in DDM file containing ${matchType} to be replaced by UUID",
-  "colMap": {
-    "Activity Date": "matching DDM column or null",
-    "Activity Time": "matching DDM column or null",
-    "Ad ID": "matching DDM column or null",
-    "Activity Type": "matching DDM column or null",
-    "Channel Type": "matching DDM column or null",
-    "Marketing Transaction ID": "matching DDM column or null",
-    "Loyalty ID/Rewards Number": "matching DDM column or null",
-    "Activity State": "matching DDM column or null",
-    "OPTIONAL EAIV Indicator": "matching DDM column or null"
-  }
-}`
+Respond with ONLY this JSON (no markdown, no explanation):
+{"refIdCol":null,"refUuidCol":null,"ddmIdCol":null,"colMap":{"Activity Date":null,"Activity Time":null,"Ad ID":null,"Activity Type":null,"Channel Type":null,"Marketing Transaction ID":null,"Loyalty ID/Rewards Number":null,"Activity State":null,"OPTIONAL EAIV Indicator":null}}`
           }],
       });
       const raw = data.content?.find(b => b.type === "text")?.text ?? "";
@@ -347,9 +333,8 @@ Return ONLY valid JSON, no markdown:
       try {
         d = JSON.parse(jsonStr);
       } catch {
-        // Try to extract just the JSON object if there's extra text around it
         const match = jsonStr.match(/\{[\s\S]*\}/);
-        if (!match) throw new Error(`Could not parse AI response: ${jsonStr.slice(0, 200)}`);
+        if (!match) throw new Error(`Auto-detect got unexpected response. Try mapping columns manually.\n\nAI said: ${jsonStr.slice(0, 300)}`);
         d = JSON.parse(match[0]);
       }
       if (d.refIdCol)   setRefIdCol(d.refIdCol);
